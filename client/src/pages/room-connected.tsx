@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRoute, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import { useWebSocket } from "@/hooks/use-websocket";
 import { 
@@ -10,12 +12,22 @@ import {
   Users,
   MessageSquare,
   X,
+  User,
+  Palette,
+  Upload,
+  Youtube,
+  Pencil,
 } from "lucide-react";
 import { VideoGrid } from "@/components/video-grid";
 import { ChatSidebar } from "@/components/chat-sidebar";
 import { ParticipantList } from "@/components/participant-list";
 import { ControlBar } from "@/components/control-bar";
 import { VideoPlayer } from "@/components/video-player";
+import { UserProfileModal } from "@/components/user-profile-modal";
+import { ThemeCustomizer } from "@/components/theme-customizer";
+import { FileSharingPanel } from "@/components/file-sharing-panel";
+import { MediaSharingPanel } from "@/components/media-sharing-panel";
+import { AnnotationCanvas } from "@/components/annotation-canvas";
 import type { Participant, ChatMessage } from "@shared/schema";
 
 export default function RoomConnected() {
@@ -35,6 +47,10 @@ export default function RoomConnected() {
   const [isSharingScreen, setIsSharingScreen] = useState(false);
   const [isVideoPlayerOpen, setIsVideoPlayerOpen] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isThemeOpen, setIsThemeOpen] = useState(false);
+  const [isAnnotating, setIsAnnotating] = useState(false);
+  const [chatTab, setChatTab] = useState<"chat" | "files" | "media">("chat");
 
   const roomId = params?.id || "";
 
@@ -211,14 +227,32 @@ export default function RoomConnected() {
             <MessageSquare className="w-4 h-4" />
           </Button>
 
-          <Button
-            variant="outline"
-            size="icon"
-            className="rounded-lg"
-            data-testid="button-settings"
-          >
-            <Settings className="w-4 h-4" />
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                className="rounded-lg"
+                data-testid="button-settings"
+              >
+                <Settings className="w-4 h-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setIsProfileOpen(true)} data-testid="menu-profile">
+                <User className="w-4 h-4 mr-2" />
+                User Profile
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setIsThemeOpen(true)} data-testid="menu-theme">
+                <Palette className="w-4 h-4 mr-2" />
+                Room Theme
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setIsAnnotating(!isAnnotating)} data-testid="menu-annotate">
+                <Pencil className="w-4 h-4 mr-2" />
+                {isAnnotating ? "Hide" : "Show"} Annotations
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 
@@ -251,11 +285,18 @@ export default function RoomConnected() {
               />
             </div>
           ) : (
-            <div className="flex-1 p-4 overflow-auto">
+            <div className="flex-1 p-4 overflow-auto relative">
               <VideoGrid 
                 participants={participants}
                 isSharingScreen={isSharingScreen}
               />
+              {isAnnotating && (
+                <AnnotationCanvas
+                  roomId={roomId}
+                  participantId={participantId}
+                  username={username}
+                />
+              )}
             </div>
           )}
 
@@ -303,12 +344,9 @@ export default function RoomConnected() {
         </div>
 
         {isChatOpen && (
-          <div className="w-full lg:w-80 border-l border-border bg-card/30 backdrop-blur-sm flex flex-col absolute lg:relative inset-0 lg:inset-auto z-20 lg:z-auto">
+          <div className="w-full lg:w-96 border-l border-border bg-card/30 backdrop-blur-sm flex flex-col absolute lg:relative inset-0 lg:inset-auto z-20 lg:z-auto">
             <div className="p-4 border-b border-border flex items-center justify-between">
-              <h2 className="font-heading font-semibold flex items-center gap-2">
-                <MessageSquare className="w-4 h-4" />
-                Chat
-              </h2>
+              <h2 className="font-heading font-semibold">Communication</h2>
               <Button
                 variant="ghost"
                 size="icon"
@@ -319,14 +357,64 @@ export default function RoomConnected() {
                 <X className="w-4 h-4" />
               </Button>
             </div>
-            <ChatSidebar 
-              messages={messages}
-              currentUserId={participantId}
-              onSendMessage={handleSendMessage}
-            />
+            <Tabs value={chatTab} onValueChange={(v) => setChatTab(v as any)} className="flex-1 flex flex-col">
+              <TabsList className="grid grid-cols-3 w-full rounded-none">
+                <TabsTrigger value="chat" data-testid="tab-chat">
+                  <MessageSquare className="w-4 h-4 mr-2" />
+                  Chat
+                </TabsTrigger>
+                <TabsTrigger value="files" data-testid="tab-files">
+                  <Upload className="w-4 h-4 mr-2" />
+                  Files
+                </TabsTrigger>
+                <TabsTrigger value="media" data-testid="tab-media">
+                  <Youtube className="w-4 h-4 mr-2" />
+                  Media
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="chat" className="flex-1 flex flex-col m-0">
+                <ChatSidebar 
+                  messages={messages}
+                  currentUserId={participantId}
+                  onSendMessage={handleSendMessage}
+                />
+              </TabsContent>
+              <TabsContent value="files" className="flex-1 p-4 overflow-auto">
+                <FileSharingPanel 
+                  roomId={roomId}
+                  participantId={participantId}
+                  username={username}
+                />
+              </TabsContent>
+              <TabsContent value="media" className="flex-1 p-4 overflow-auto">
+                <MediaSharingPanel 
+                  roomId={roomId}
+                  participantId={participantId}
+                  username={username}
+                />
+              </TabsContent>
+            </Tabs>
           </div>
         )}
       </div>
+
+      {/* Modals */}
+      {isProfileOpen && (
+        <UserProfileModal 
+          open={isProfileOpen}
+          onOpenChange={setIsProfileOpen}
+          username={username}
+        />
+      )}
+      
+      {isThemeOpen && (
+        <ThemeCustomizer 
+          open={isThemeOpen}
+          onOpenChange={setIsThemeOpen}
+          userId={participantId}
+          roomId={roomId}
+        />
+      )}
     </div>
   );
 }

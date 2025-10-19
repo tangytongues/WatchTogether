@@ -13,6 +13,114 @@ interface ExtendedWebSocket extends WebSocket {
 export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
   
+  app.post('/api/users', async (req, res) => {
+    try {
+      const user = await storage.createUser(req.body);
+      res.json(user);
+    } catch (error) {
+      res.status(400).json({ error: 'Failed to create user' });
+    }
+  });
+
+  app.get('/api/users/:username', async (req, res) => {
+    const user = await storage.getUserByUsername(req.params.username);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.json(user);
+  });
+
+  app.get('/api/rooms/:roomId', async (req, res) => {
+    const room = await storage.getRoom(req.params.roomId);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    res.json(room);
+  });
+
+  app.patch('/api/rooms/:roomId', async (req, res) => {
+    const room = await storage.updateRoom(req.params.roomId, req.body);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    res.json(room);
+  });
+
+  app.post('/api/rooms/:roomId/files', async (req, res) => {
+    try {
+      const file = await storage.addSharedFile({
+        roomId: req.params.roomId,
+        ...req.body,
+      });
+      res.json(file);
+    } catch (error) {
+      res.status(400).json({ error: 'Failed to share file' });
+    }
+  });
+
+  app.get('/api/rooms/:roomId/files', async (req, res) => {
+    const files = await storage.getRoomFiles(req.params.roomId);
+    res.json(files);
+  });
+
+  app.post('/api/rooms/:roomId/media', async (req, res) => {
+    try {
+      const media = await storage.addSharedMedia({
+        roomId: req.params.roomId,
+        ...req.body,
+      });
+      res.json(media);
+    } catch (error) {
+      res.status(400).json({ error: 'Failed to share media' });
+    }
+  });
+
+  app.get('/api/rooms/:roomId/media', async (req, res) => {
+    const media = await storage.getRoomMedia(req.params.roomId);
+    res.json(media);
+  });
+
+  app.post('/api/themes', async (req, res) => {
+    try {
+      const theme = await storage.createRoomTheme(req.body);
+      res.json(theme);
+    } catch (error) {
+      res.status(400).json({ error: 'Failed to create theme' });
+    }
+  });
+
+  app.get('/api/themes/user/:userId', async (req, res) => {
+    const themes = await storage.getUserThemes(req.params.userId);
+    res.json(themes);
+  });
+
+  app.get('/api/themes/public', async (req, res) => {
+    const themes = await storage.getPublicThemes();
+    res.json(themes);
+  });
+
+  app.post('/api/rooms/:roomId/annotations', async (req, res) => {
+    try {
+      const annotation = await storage.addAnnotation({
+        roomId: req.params.roomId,
+        ...req.body,
+      });
+      res.json(annotation);
+    } catch (error) {
+      res.status(400).json({ error: 'Failed to add annotation' });
+    }
+  });
+
+  app.get('/api/rooms/:roomId/annotations', async (req, res) => {
+    const annotations = await storage.getRoomAnnotations(req.params.roomId);
+    res.json(annotations);
+  });
+
+  app.delete('/api/rooms/:roomId/annotations', async (req, res) => {
+    await storage.clearRoomAnnotations(req.params.roomId);
+    res.json({ success: true });
+  });
+  
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
   const clients = new Map<string, ExtendedWebSocket>();
@@ -53,16 +161,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           case WebSocketMessageType.JOIN_ROOM: {
             const { roomId, username, roomName } = message.payload;
             
+            const existingParticipants = await storage.getRoomParticipants(roomId);
+            
             let room = await storage.getRoom(roomId);
             if (!room) {
-              const firstParticipant = (await storage.getRoomParticipants(roomId)).length === 0;
-              room = await storage.createRoom(roomName || `Room ${roomId}`, roomId);
+              room = await storage.createRoom(roomName || `Room ${roomId}`, roomId, roomId);
             }
 
-            const existingParticipants = await storage.getRoomParticipants(roomId);
             const participant = await storage.addParticipant({
               roomId,
               username,
+              userId: null,
               isHost: existingParticipants.length === 0,
               isMuted: false,
               isCameraOff: false,
@@ -181,6 +290,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
               },
             });
 
+            break;
+          }
+
+          case WebSocketMessageType.FILE_SHARED: {
+            if (!ws.roomId) break;
+            
+            broadcastToRoom(ws.roomId, {
+              type: WebSocketMessageType.FILE_SHARED,
+              payload: message.payload,
+            });
+            
+            break;
+          }
+
+          case WebSocketMessageType.MEDIA_SHARED: {
+            if (!ws.roomId) break;
+            
+            broadcastToRoom(ws.roomId, {
+              type: WebSocketMessageType.MEDIA_SHARED,
+              payload: message.payload,
+            });
+            
+            break;
+          }
+
+          case WebSocketMessageType.ANNOTATION_ADDED: {
+            if (!ws.roomId) break;
+            
+            broadcastToRoom(ws.roomId, {
+              type: WebSocketMessageType.ANNOTATION_ADDED,
+              payload: message.payload,
+            }, ws.participantId);
+            
+            break;
+          }
+
+          case WebSocketMessageType.ANNOTATION_CLEARED: {
+            if (!ws.roomId) break;
+            
+            broadcastToRoom(ws.roomId, {
+              type: WebSocketMessageType.ANNOTATION_CLEARED,
+              payload: {},
+            });
+            
+            break;
+          }
+
+          case WebSocketMessageType.POINTER_MOVED: {
+            if (!ws.roomId || !ws.participantId) break;
+            
+            broadcastToRoom(ws.roomId, {
+              type: WebSocketMessageType.POINTER_MOVED,
+              payload: {
+                participantId: ws.participantId,
+                ...message.payload,
+              },
+            }, ws.participantId);
+            
             break;
           }
         }
